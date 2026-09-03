@@ -8,63 +8,38 @@ This repository is a work in progress. See [Status](#status) below for what is c
 
 ## Architecture
 
-The target architecture (from the original project proposal) combines a deterministic rule engine with a LangGraph multi-agent graph, shared execution state, long-term memory, guardrails, and observability:
+The target architecture (from the original project proposal) is a LangGraph graph in which a central Orchestrator decides the next step at every turn. A run can end without changes, repeat steps, request refinement, or take a different path depending on context:
 
 ```mermaid
 flowchart TB
-    ORCH{{"Orchestrator (LLM agent)<br/>selects the next step"}}
+    ORCH{{Orchestrator}}
+    MON[Monitoring]
+    ANALYST([Analyst])
+    GEN([Rule generator])
+    BACKTEST[Backtest]
+    REVIEW([Reviewer])
+    RISK([Risk manager])
+    HUMAN[/Human review/]
+    PUBLISH[Publish]
+    LOOP((next cycle))
 
-    subgraph DATA["Data environment"]
-        HIST[(Historical transactions<br/>and fraud labels)]
-    end
-
-    subgraph PIPELINE["RiskOps graph (LangGraph)"]
-        MON[Monitoring<br/>deterministic]
-        ANALYST([Analyst<br/>LLM agent])
-        GEN([Rule generator<br/>LLM agent])
-        BACKTEST[Backtest<br/>deterministic]
-        REVIEW([Reviewer<br/>LLM agent])
-        RISK([Risk manager<br/>LLM agent])
-        HUMAN[/Human review/]
-        PUBLISH[Registry and publication<br/>deterministic]
-
-        MON -->|degradation detected| ANALYST
-        ANALYST --> GEN
-        GEN --> BACKTEST
-        BACKTEST --> REVIEW
-        REVIEW -->|refine| GEN
-        REVIEW -->|evidence ready| RISK
-        RISK -->|critical change| HUMAN
-        RISK -->|low-risk change| PUBLISH
-        HUMAN -->|approved| PUBLISH
-    end
-
-    subgraph ENGINE["Risk rules engine (deterministic)"]
-        RULES[(Rule registry<br/>versions and audit log)]
-    end
-
-    LOOP((back to<br/>Orchestrator))
-
-    subgraph SUPPORT["Cross-cutting concerns"]
-        STATE[(Shared execution state)]
-        MEMORY[(Long-term memory<br/>knowledge graph)]
-        GUARD{{Guardrails and harness}}
-        OBS[[Observability]]
-    end
-
-    ORCH ==>|selects next step| MON
-    HIST --> MON
-    RULES -.current rules.-> BACKTEST
-    PUBLISH --> RULES
-
+    ORCH ==> MON
+    MON -->|degradation detected| ANALYST
+    ANALYST --> GEN
+    GEN --> BACKTEST
+    BACKTEST --> REVIEW
+    REVIEW -->|refine| GEN
+    REVIEW -->|evidence ready| RISK
+    RISK -->|critical change| HUMAN
+    RISK -->|low-risk change| PUBLISH
+    HUMAN -->|approved| PUBLISH
     MON -->|no issue| LOOP
     HUMAN -->|rejected| LOOP
     PUBLISH --> LOOP
-
-    ORCH -.-> SUPPORT
+    LOOP -.-> ORCH
 ```
 
-The table below details each graph node's role:
+Square nodes are deterministic (Monitoring, Backtest, Publish); rounded nodes are LLM agents (Analyst, Rule Generator, Reviewer, Risk Manager). The table below details each one's role:
 
 | Node | Type | Role |
 |---|---|---|
@@ -75,8 +50,10 @@ The table below details each graph node's role:
 | Backtest | Deterministic | Measures a candidate's impact on historical data |
 | Reviewer | LLM agent | Evaluates the evidence, issues a verdict |
 | Risk Manager | LLM agent | Consolidates the decision (approve/reject/escalate) |
+| Human Review | Human | Required approval gate for critical changes |
+| Publish | Deterministic | Records the new version and updates the audit trail |
 
-Because the process is represented as a graph, a run can end without changes, repeat steps, request refinement, or take different paths depending on context. Long-term memory, observability, and guardrails (permission limits, iteration caps, mandatory human review for critical changes, rollback) are part of the target architecture but not yet implemented.
+Around this graph, four cross-cutting systems complete the target architecture, none of them built yet: a **risk rules engine** that owns deterministic rule execution, versioning, and the official change history (Monitoring and Backtest read from it, Publish writes to it); **long-term memory** for recalling context from past runs; **guardrails** limiting permissions, capping iterations, and requiring human review for critical changes; and **observability** recording traces, decisions, and metrics for every run.
 
 ## Status
 
