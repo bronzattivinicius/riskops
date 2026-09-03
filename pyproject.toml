@@ -1,0 +1,36 @@
+[project]
+name = "riskops"
+version = "0.1.0"
+description = "Multi-agent system for automated lifecycle management of risk rules"
+authors = [
+    {name = "Mariana Aparecida Ferreira"},
+    {name = "Vinicius Luis Belem Bronzatti"}
+]
+requires-python = ">=3.12,<4.0"
+dependencies = [
+    "langgraph (>=1.2.11,<2.0.0)",
+    "langchain (>=1.3.18,<2.0.0)",
+    "langchain-core (>=1.6.1,<2.0.0)",
+    "langsmith (>=0.12.1,<0.13.0)",
+    "langchain-openai (>=1.6.0,<2.0.0)",
+    "pandas (>=3.0.5,<4.0.0)",
+    "numpy (>=2.5.2,<3.0.0)",
+    "python-dotenv (>=1.2.3,<2.0.0)",
+    "kaggle (>=2.2.4,<3.0.0)",
+    "pyyaml (>=6.0.3,<7.0.0)",
+    "pydantic (>=2.7.4,<3.0.0)"
+]
+
+[tool.poetry]
+packages = [{include = "riskops", from = "src"}]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+ruff = "^0.6.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

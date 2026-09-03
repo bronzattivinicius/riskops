@@ -1,0 +1,55 @@
+id: baf_high_velocity_6h
+name: High application velocity in the last 6 hours
+version: 1
+status: active
+description: 'Flags applications made during a burst of application activity in the
+  last 6 hours. Written on the intuitive assumption that high velocity indicates automated
+  or bot-driven fraud; never validated against historical data. Measured fraud rate:
+  0.99% (n=540,693) -- *below* the 1.10% dataset baseline, i.e. this condition is
+  actively counterproductive.'
+logic:
+  logic: and
+  conditions:
+  - field: velocity_6h
+    operator: gt
+    value: 5000
+tags:
+- baf
+- seed
+- legacy
+created_at: '2026-09-03T01:09:42.354920Z'
+updated_at: '2026-09-03T01:09:42.354920Z'
+created_by: riskops-seed
+updated_by: riskops-seed
+schema_version: 1
+history:
+- version: 1
+  status: active
+  changed_at: '2026-09-03T01:09:42.354920Z'
+  changed_by: riskops-seed
+  change_note: seed legacy baseline rule for BAF, not statistically validated
+  snapshot:
+    id: baf_high_velocity_6h
+    name: High application velocity in the last 6 hours
+    version: 1
+    status: active
+    description: 'Flags applications made during a burst of application activity in
+      the last 6 hours. Written on the intuitive assumption that high velocity indicates
+      automated or bot-driven fraud; never validated against historical data. Measured
+      fraud rate: 0.99% (n=540,693) -- *below* the 1.10% dataset baseline, i.e. this
+      condition is actively counterproductive.'
+    logic:
+      logic: and
+      conditions:
+      - field: velocity_6h
+        operator: gt
+        value: 5000
+    tags:
+    - baf
+    - seed
+    - legacy
+    created_at: '2026-09-03T01:09:42.354920Z'
+    updated_at: '2026-09-03T01:09:42.354920Z'
+    created_by: riskops-seed
+    updated_by: riskops-seed
+    schema_version: 1

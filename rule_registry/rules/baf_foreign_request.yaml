@@ -1,0 +1,52 @@
+id: baf_foreign_request
+name: Foreign-origin request
+version: 1
+status: active
+description: 'Flags applications originating from a country different from the bank''s.
+  Written on the intuitive assumption that cross-border requests are riskier; never
+  validated against historical data. Measured fraud rate: 2.20% (n=25,242).'
+logic:
+  logic: and
+  conditions:
+  - field: foreign_request
+    operator: eq
+    value: 1
+tags:
+- baf
+- seed
+- legacy
+created_at: '2026-09-03T01:09:42.354920Z'
+updated_at: '2026-09-03T01:09:42.354920Z'
+created_by: riskops-seed
+updated_by: riskops-seed
+schema_version: 1
+history:
+- version: 1
+  status: active
+  changed_at: '2026-09-03T01:09:42.354920Z'
+  changed_by: riskops-seed
+  change_note: seed legacy baseline rule for BAF, not statistically validated
+  snapshot:
+    id: baf_foreign_request
+    name: Foreign-origin request
+    version: 1
+    status: active
+    description: 'Flags applications originating from a country different from the
+      bank''s. Written on the intuitive assumption that cross-border requests are
+      riskier; never validated against historical data. Measured fraud rate: 2.20%
+      (n=25,242).'
+    logic:
+      logic: and
+      conditions:
+      - field: foreign_request
+        operator: eq
+        value: 1
+    tags:
+    - baf
+    - seed
+    - legacy
+    created_at: '2026-09-03T01:09:42.354920Z'
+    updated_at: '2026-09-03T01:09:42.354920Z'
+    created_by: riskops-seed
+    updated_by: riskops-seed
+    schema_version: 1
