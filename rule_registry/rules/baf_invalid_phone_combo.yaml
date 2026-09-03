@@ -1,0 +1,57 @@
+id: baf_invalid_phone_combo
+name: Both home and mobile phone invalid
+version: 1
+status: candidate
+description: 'Flags applications where neither the provided home nor mobile phone
+  number is valid. A moderate, debatable signal: 2.78% fraud rate (n=22,232 on Base.csv),
+  roughly 2.5x baseline -- not clearly strong or clearly weak.'
+logic:
+  logic: and
+  conditions:
+  - field: phone_home_valid
+    operator: eq
+    value: 0
+  - field: phone_mobile_valid
+    operator: eq
+    value: 0
+tags:
+- baf
+- candidate
+- ambiguous
+created_at: '2026-09-03T17:08:54.722634Z'
+updated_at: '2026-09-03T17:08:54.722634Z'
+created_by: riskops-seed
+updated_by: riskops-seed
+schema_version: 1
+history:
+- version: 1
+  status: candidate
+  changed_at: '2026-09-03T17:08:54.722634Z'
+  changed_by: riskops-seed
+  change_note: candidate rule seeded for Deliverable 1 test fixtures
+  snapshot:
+    id: baf_invalid_phone_combo
+    name: Both home and mobile phone invalid
+    version: 1
+    status: candidate
+    description: 'Flags applications where neither the provided home nor mobile phone
+      number is valid. A moderate, debatable signal: 2.78% fraud rate (n=22,232 on
+      Base.csv), roughly 2.5x baseline -- not clearly strong or clearly weak.'
+    logic:
+      logic: and
+      conditions:
+      - field: phone_home_valid
+        operator: eq
+        value: 0
+      - field: phone_mobile_valid
+        operator: eq
+        value: 0
+    tags:
+    - baf
+    - candidate
+    - ambiguous
+    created_at: '2026-09-03T17:08:54.722634Z'
+    updated_at: '2026-09-03T17:08:54.722634Z'
+    created_by: riskops-seed
+    updated_by: riskops-seed
+    schema_version: 1
