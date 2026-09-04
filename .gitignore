@@ -11,3 +11,4 @@ data/processed/*
 !data/processed/.gitkeep
 
 .DS_Store
+riskops_repo/
