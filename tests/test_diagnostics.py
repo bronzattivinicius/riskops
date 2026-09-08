@@ -246,3 +246,30 @@ def test_impressao_digital_casos_is_stable_and_order_sensitive() -> None:
 
     assert impressao_digital_casos(casos_a) == impressao_digital_casos(casos_b)
     assert impressao_digital_casos(casos_a) != impressao_digital_casos(casos_c)
+
+
+class _RaisingStructuredLLM:
+    """Stand-in for a model call that fails server-side (e.g. malformed JSON)."""
+
+    def invoke(self, _prompt: str) -> dict:
+        raise RuntimeError("Failed to parse tool call arguments as JSON")
+
+
+def test_diagnosticar_regra_server_side_failure_is_graceful_error(
+    synthetic_applications_df: pd.DataFrame, tmp_rule_store: RuleStore
+) -> None:
+    """A raised exception from the model call (not just a null parse) is also caught."""
+    rule = _build_rule("baf_test_rule")
+    tmp_rule_store.create(rule, actor=_ACTOR, note="setup")
+
+    resultado = diagnosticar_regra(
+        "baf_test_rule",
+        store=tmp_rule_store,
+        df=synthetic_applications_df,
+        structured_llm=_RaisingStructuredLLM(),
+        label_col="fraud_bool",
+    )
+
+    assert resultado["ok"] is False
+    assert "chamada ao modelo falhou" in resultado["erro"]
+    assert resultado["chamadas_llm"] == 1

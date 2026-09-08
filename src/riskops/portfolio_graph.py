@@ -169,11 +169,22 @@ def build_graph(*, store: RuleStore, df: pd.DataFrame, llm, structured_llm, labe
         }
 
     def finalizar_diagnostico(state: DiagnosticoPortfolioState) -> dict:
-        saida = structured_llm.invoke(state["messages"])
+        chamadas_ferramenta = sum(1 for m in state["messages"] if isinstance(m, ToolMessage))
+        try:
+            saida = structured_llm.invoke(state["messages"])
+        except Exception as exc:
+            # O modelo pode gerar JSON malformado que falha do lado do servidor, antes de
+            # chegar na validacao do Pydantic -- ainda assim conta como uma chamada ao modelo.
+            return {
+                "resultados": [{"id": state["regra_atual"], "ok": False, "erro": f"chamada ao modelo falhou: {exc}"}],
+                "chamadas_llm": 1,
+                "chamadas_ferramenta": chamadas_ferramenta,
+                "tokens_entrada_total": 0,
+                "tokens_saida_total": 0,
+            }
         avaliacao = saida["parsed"]
         bruta = saida["raw"]
         uso = getattr(bruta, "usage_metadata", None) or {}
-        chamadas_ferramenta = sum(1 for m in state["messages"] if isinstance(m, ToolMessage))
 
         if avaliacao is None:
             resultado = {

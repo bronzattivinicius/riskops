@@ -177,7 +177,20 @@ def diagnosticar_regra(
     metricas = resultado_backtest.metrics
 
     prompt = montar_prompt(rule, metricas, baseline_fraud_rate)
-    saida = structured_llm.invoke(prompt)
+    try:
+        saida = structured_llm.invoke(prompt)
+    except Exception as exc:
+        # O modelo pode gerar JSON malformado (ex.: aspas simples/duplas misturadas) que
+        # falha do lado do servidor, antes mesmo de chegar na validacao do Pydantic --
+        # essa chamada ainda conta como uma tentativa de chamada ao modelo.
+        return {
+            "ok": False,
+            "erro": f"chamada ao modelo falhou: {exc}",
+            "latencia_s": round(time.perf_counter() - inicio, 2),
+            "chamadas_llm": 1,
+            "tokens_entrada": None,
+            "tokens_saida": None,
+        }
     latencia = time.perf_counter() - inicio
 
     avaliacao = saida["parsed"]
