@@ -14,6 +14,7 @@ no judgment call in "what rule comes next"); whether to consult more context
 before answering is delegated to the model via ``tools_condition``/``ToolNode``.
 """
 
+import dataclasses
 import operator
 from typing import Annotated, TypedDict
 
@@ -25,7 +26,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from riskops.diagnostics import montar_prompt, veredito_referencia
-from riskops.metrics.backtest import backtest_ruleset
+from riskops.metrics.backtest import ClassificationMetrics, backtest_ruleset
 from riskops.rules.store import RuleNotFoundError, RuleStore
 
 INSTRUCAO_SISTEMA = (
@@ -44,8 +45,9 @@ class DiagnosticoPortfolioState(TypedDict):
     Attributes:
         fila_regras: Rule ids still waiting to be processed.
         regra_atual: Id of the rule currently being diagnosed, or None.
-        metricas_atual: Backtest result (``ClassificationMetrics``) for
-            ``regra_atual``, or None.
+        metricas_atual: Backtest result for ``regra_atual``, as a plain dict
+            (``dataclasses.asdict`` of a ``ClassificationMetrics``) so it
+            serializes cleanly through the checkpointer.
         messages: Conversation for the current rule's tool-deciding step,
             reset (via ``RemoveMessage``) each time a new rule starts.
         resultados: Diagnoses accumulated so far, one dict per rule.
@@ -150,7 +152,9 @@ def build_graph(*, store: RuleStore, df: pd.DataFrame, llm, structured_llm, labe
         metricas = backtest_ruleset(df, [rule], label_col=label_col).metrics
         prompt = montar_prompt(rule, metricas, baseline_fraud_rate)
         return {
-            "metricas_atual": metricas,
+            # stored as a plain dict (not the ClassificationMetrics instance) so it
+            # round-trips cleanly through the checkpointer's msgpack serialization.
+            "metricas_atual": dataclasses.asdict(metricas),
             "messages": [SystemMessage(content=INSTRUCAO_SISTEMA), HumanMessage(content=prompt)],
         }
 
@@ -178,7 +182,7 @@ def build_graph(*, store: RuleStore, df: pd.DataFrame, llm, structured_llm, labe
                 "erro": f"falha ao interpretar resposta do modelo: {saida.get('parsing_error')}",
             }
         else:
-            metricas = state["metricas_atual"]
+            metricas = ClassificationMetrics(**state["metricas_atual"])
             resultado = {
                 "id": state["regra_atual"],
                 "ok": True,
