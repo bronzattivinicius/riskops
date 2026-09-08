@@ -8,6 +8,8 @@ are graded, user-facing content for a Portuguese-speaking audience, not
 library-internal naming.
 """
 
+import hashlib
+import json
 import re
 import time
 from typing import Literal
@@ -204,3 +206,59 @@ def diagnosticar_regra(
         "tokens_entrada": uso.get("input_tokens"),
         "tokens_saida": uso.get("output_tokens"),
     }
+
+
+def verificar_caso(caso: dict, resultado: dict) -> tuple[bool | None, str]:
+    """Verifies one executed test case against its expectation (Deliverable 1 RF-02/RF-03/RF-04).
+
+    For expected-error cases (missing/empty input), only checks that the
+    error was handled gracefully. For other automatic cases, checks both
+    that a backtest metric is cited in the justification and that the
+    verdict agrees with the deterministic reference. Manually-verified
+    (ambiguous) cases are not judged automatically.
+
+    Args:
+        caso: A test case dict, with "verificacao" and "tipo" keys.
+        resultado: The result dict for that case, from `diagnosticar_regra`
+            or an equivalent producer (e.g. the portfolio graph), which
+            must include the same keys: `ok`, `erro`, `veredito`,
+            `veredito_referencia`, `justificativa`, `metricas_backtest`.
+
+    Returns:
+        A tuple `(aprovado, observacao)`: `aprovado` is a bool, or None
+        when verification is manual; `observacao` explains the outcome.
+    """
+    if caso["verificacao"] == "manual":
+        return None, "requer avaliacao manual (caso ambiguo)"
+
+    if caso["tipo"] in ("informacao ausente", "entrada incompleta"):
+        aprovado = not resultado["ok"] and bool(resultado.get("erro"))
+        return aprovado, f"erro tratado: {resultado.get('erro')}"
+
+    metricas = resultado["metricas_backtest"]
+    ref = resultado["veredito_referencia"]
+    veredito_ok = resultado["veredito"] == ref
+    citacao_ok = metrica_citada(resultado["justificativa"], metricas.detection_rate) or metrica_citada(
+        resultado["justificativa"], metricas.false_positive_rate
+    )
+    aprovado = veredito_ok and citacao_ok
+    observacao = f"veredito={resultado['veredito']} referencia={ref} citacao_metrica={citacao_ok}"
+    return aprovado, observacao
+
+
+def impressao_digital_casos(test_cases: list[dict]) -> str:
+    """Computes a short fingerprint of the frozen test case set.
+
+    Used to verify the set is unchanged between deliverables. A stand-in
+    for the course's own supplement utility (mentioned in the Deliverable 2
+    prompt), which was not available to this project.
+
+    Args:
+        test_cases: The list of test case dicts (e.g. the module-level
+            `test_cases` defined in each deliverable's notebook).
+
+    Returns:
+        A 16-character hex digest of the canonical JSON serialization.
+    """
+    canonico = json.dumps(test_cases, sort_keys=True, ensure_ascii=True)
+    return hashlib.sha256(canonico.encode("utf-8")).hexdigest()[:16]

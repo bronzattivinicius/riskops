@@ -8,9 +8,11 @@ import pytest
 from riskops.diagnostics import (
     RuleAssessment,
     diagnosticar_regra,
+    impressao_digital_casos,
     metrica_citada,
     montar_prompt,
     veredito_referencia,
+    verificar_caso,
 )
 from riskops.metrics.backtest import ClassificationMetrics
 from riskops.rules.schema import Condition, ConditionGroup, Operator, Rule, RuleStatus
@@ -193,3 +195,54 @@ def test_diagnosticar_regra_parsing_failure_is_graceful_error(
     assert resultado["ok"] is False
     assert "falha ao interpretar" in resultado["erro"]
     assert resultado["chamadas_llm"] == 1
+
+
+def test_verificar_caso_manual_returns_none() -> None:
+    """A manually-verified case is never auto-approved or auto-rejected."""
+    caso = {"verificacao": "manual", "tipo": "ambiguo"}
+    aprovado, observacao = verificar_caso(caso, {})
+    assert aprovado is None
+    assert "manual" in observacao
+
+
+def test_verificar_caso_expected_error_checks_graceful_handling() -> None:
+    """An expected-error case passes only when the error was handled gracefully."""
+    caso = {"verificacao": "auto", "tipo": "informacao ausente"}
+    aprovado, _ = verificar_caso(caso, {"ok": False, "erro": "regra nao encontrada"})
+    assert aprovado is True
+
+    aprovado, _ = verificar_caso(caso, {"ok": True, "erro": None})
+    assert aprovado is False
+
+
+def test_verificar_caso_checks_citation_and_verdict_agreement() -> None:
+    """A normal case passes only when both the citation and the verdict match."""
+    metricas = _metrics(true_positives=10, false_positives=90, true_negatives=9800, false_negatives=100)
+    caso = {"verificacao": "auto", "tipo": "normal"}
+    resultado_ok = {
+        "ok": True,
+        "veredito": "aposentar",
+        "veredito_referencia": "aposentar",
+        "justificativa": f"detection_rate={metricas.detection_rate:.1%}",
+        "metricas_backtest": metricas,
+    }
+    aprovado, _ = verificar_caso(caso, resultado_ok)
+    assert aprovado is True
+
+    resultado_sem_citacao = {**resultado_ok, "justificativa": "sem numeros aqui"}
+    aprovado, _ = verificar_caso(caso, resultado_sem_citacao)
+    assert aprovado is False
+
+    resultado_veredito_diferente = {**resultado_ok, "veredito": "manter"}
+    aprovado, _ = verificar_caso(caso, resultado_veredito_diferente)
+    assert aprovado is False
+
+
+def test_impressao_digital_casos_is_stable_and_order_sensitive() -> None:
+    """The fingerprint is deterministic, and differs when the case set actually changes."""
+    casos_a = [{"id": "T01", "rule_id": "r1"}, {"id": "T02", "rule_id": "r2"}]
+    casos_b = [{"id": "T01", "rule_id": "r1"}, {"id": "T02", "rule_id": "r2"}]
+    casos_c = [{"id": "T01", "rule_id": "r1"}, {"id": "T02", "rule_id": "r2-diferente"}]
+
+    assert impressao_digital_casos(casos_a) == impressao_digital_casos(casos_b)
+    assert impressao_digital_casos(casos_a) != impressao_digital_casos(casos_c)
