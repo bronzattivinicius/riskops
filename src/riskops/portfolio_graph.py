@@ -48,6 +48,10 @@ class DiagnosticoPortfolioState(TypedDict):
         metricas_atual: Backtest result for ``regra_atual``, as a plain dict
             (``dataclasses.asdict`` of a ``ClassificationMetrics``) so it
             serializes cleanly through the checkpointer.
+        regra_encontrada: Whether ``regra_atual`` exists in the registry.
+            False (missing/empty rule id) short-circuits straight to the
+            next rule, matching Deliverable 1's RF-04 graceful-error
+            guarantee -- the agentic/finalization steps are skipped.
         messages: Conversation for the current rule's tool-deciding step,
             reset (via ``RemoveMessage``) each time a new rule starts.
         resultados: Diagnoses accumulated so far, one dict per rule.
@@ -59,6 +63,7 @@ class DiagnosticoPortfolioState(TypedDict):
 
     fila_regras: list[str]
     regra_atual: str | None
+    regra_encontrada: bool
     metricas_atual: object
     messages: Annotated[list[BaseMessage], add_messages]
     resultados: Annotated[list[dict], operator.add]
@@ -148,15 +153,34 @@ def build_graph(*, store: RuleStore, df: pd.DataFrame, llm, structured_llm, labe
         }
 
     def backtest(state: DiagnosticoPortfolioState) -> dict:
-        rule = store.get(state["regra_atual"])
+        regra_id = state["regra_atual"]
+        try:
+            rule = store.get(regra_id) if regra_id else None
+            if rule is None:
+                raise RuleNotFoundError(f"rule_id vazio ou nao informado (regra_id={regra_id!r})")
+        except RuleNotFoundError:
+            # Regra ausente/vazia: mesma garantia de erro gracioso da RF-04 do E1, mas
+            # dentro do proprio grafo -- pula o passo agente/finalizacao para esta regra.
+            return {
+                "regra_encontrada": False,
+                "resultados": [
+                    {"id": regra_id, "ok": False, "erro": f"regra {regra_id!r} nao encontrada no registro (ou vazia)."}
+                ],
+                "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)],
+            }
+
         metricas = backtest_ruleset(df, [rule], label_col=label_col).metrics
         prompt = montar_prompt(rule, metricas, baseline_fraud_rate)
         return {
+            "regra_encontrada": True,
             # stored as a plain dict (not the ClassificationMetrics instance) so it
             # round-trips cleanly through the checkpointer's msgpack serialization.
             "metricas_atual": dataclasses.asdict(metricas),
             "messages": [SystemMessage(content=INSTRUCAO_SISTEMA), HumanMessage(content=prompt)],
         }
+
+    def apos_backtest(state: DiagnosticoPortfolioState) -> str:
+        return "agente_diagnostico" if state.get("regra_encontrada") else ha_regras_pendentes(state)
 
     def agente_diagnostico(state: DiagnosticoPortfolioState) -> dict:
         resposta = llm_com_ferramentas.invoke(state["messages"])
@@ -221,7 +245,9 @@ def build_graph(*, store: RuleStore, df: pd.DataFrame, llm, structured_llm, labe
 
     builder.set_conditional_entry_point(ha_regras_pendentes, {"proxima_regra": "proxima_regra", END: END})
     builder.add_edge("proxima_regra", "backtest")
-    builder.add_edge("backtest", "agente_diagnostico")
+    builder.add_conditional_edges(
+        "backtest", apos_backtest, {"agente_diagnostico": "agente_diagnostico", "proxima_regra": "proxima_regra", END: END}
+    )
     builder.add_conditional_edges(
         "agente_diagnostico", tools_condition, {"tools": "ferramentas", "__end__": "finalizar_diagnostico"}
     )

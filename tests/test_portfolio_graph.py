@@ -145,3 +145,34 @@ def test_graph_respects_recursion_limit(
             },
             config={"recursion_limit": 2},
         )
+
+
+def test_graph_handles_missing_rule_gracefully(
+    store_com_duas_regras: RuleStore, synthetic_applications_df: pd.DataFrame
+) -> None:
+    """A nonexistent or empty rule_id in the queue is reported, not raised, and the queue continues."""
+    builder = build_graph(
+        store=store_com_duas_regras, df=synthetic_applications_df, llm=_FakeAgentLLM(), structured_llm=_FakeStructuredLLM()
+    )
+    graph = builder.compile()
+
+    resultado = graph.invoke(
+        {
+            "fila_regras": ["regra_fantasma", "", "regra_normal"],
+            "resultados": [],
+            "chamadas_llm": 0,
+            "chamadas_ferramenta": 0,
+            "tokens_entrada_total": 0,
+            "tokens_saida_total": 0,
+        },
+        config={"recursion_limit": 50},
+    )
+
+    por_id = {r["id"]: r for r in resultado["resultados"]}
+    assert por_id["regra_fantasma"]["ok"] is False
+    assert "nao encontrada" in por_id["regra_fantasma"]["erro"]
+    assert por_id[""]["ok"] is False
+    # a regra valida depois das invalidas ainda eh processada normalmente
+    assert por_id["regra_normal"]["ok"] is True
+    # nenhuma chamada de LLM foi gasta com as duas entradas invalidas
+    assert resultado["chamadas_llm"] == 2
