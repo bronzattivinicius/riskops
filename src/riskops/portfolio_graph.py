@@ -142,9 +142,31 @@ def build_graph(*, store: RuleStore, df: pd.DataFrame, llm, structured_llm, labe
     llm_com_ferramentas = llm.bind_tools([ferramenta_historico])
 
     def ha_regras_pendentes(state: DiagnosticoPortfolioState) -> str:
+        """Routes to the next queued rule, or to END if the queue is empty.
+
+        Used both as the graph's conditional entry point and after
+        ``finalizar_diagnostico``/``backtest`` (for a missing rule), so the
+        batch loop and its early-exit paths share one routing decision.
+
+        Args:
+            state: Current graph state.
+
+        Returns:
+            "proxima_regra" if ``fila_regras`` is non-empty, else ``END``.
+        """
         return "proxima_regra" if state["fila_regras"] else END
 
     def proxima_regra(state: DiagnosticoPortfolioState) -> dict:
+        """Dequeues the next rule id and resets the per-rule conversation.
+
+        Args:
+            state: Current graph state; must have a non-empty ``fila_regras``.
+
+        Returns:
+            A state update: the popped queue, the new ``regra_atual``, and a
+            ``messages`` reset (via ``RemoveMessage``) so the previous
+            rule's conversation does not leak into this one.
+        """
         fila = state["fila_regras"]
         return {
             "fila_regras": fila[1:],
@@ -153,6 +175,23 @@ def build_graph(*, store: RuleStore, df: pd.DataFrame, llm, structured_llm, labe
         }
 
     def backtest(state: DiagnosticoPortfolioState) -> dict:
+        """Runs the deterministic backtest for the current rule, or records its absence.
+
+        Looks up ``regra_atual`` in the registry and backtests it
+        (reusing ``backtest_ruleset`` from Phase 1) to seed the prompt for
+        ``agente_diagnostico``. A missing or empty rule id is not an
+        exception here: it is recorded directly as a failed result (RF-04),
+        and ``apos_backtest`` routes around the agent/finalization steps.
+
+        Args:
+            state: Current graph state; ``regra_atual`` is the rule to look up.
+
+        Returns:
+            A state update. On success: ``regra_encontrada=True``,
+            ``metricas_atual`` (as a plain dict), and the seed messages. On
+            a missing/empty rule: ``regra_encontrada=False`` and a failed
+            entry appended to ``resultados``.
+        """
         regra_id = state["regra_atual"]
         try:
             rule = store.get(regra_id) if regra_id else None
@@ -180,9 +219,32 @@ def build_graph(*, store: RuleStore, df: pd.DataFrame, llm, structured_llm, labe
         }
 
     def apos_backtest(state: DiagnosticoPortfolioState) -> str:
+        """Routes past the agent/finalization steps for a rule that was not found.
+
+        Args:
+            state: Current graph state, right after ``backtest``.
+
+        Returns:
+            "agente_diagnostico" if the rule was found; otherwise whatever
+            ``ha_regras_pendentes`` decides (skip straight to the next
+            rule, or END).
+        """
         return "agente_diagnostico" if state.get("regra_encontrada") else ha_regras_pendentes(state)
 
     def agente_diagnostico(state: DiagnosticoPortfolioState) -> dict:
+        """Lets the model decide whether it needs the history tool before answering.
+
+        Invokes the tool-bound model on the accumulated messages. The
+        model's response may or may not include a tool call; routing after
+        this node (``tools_condition``) inspects that to decide.
+
+        Args:
+            state: Current graph state, with the rule's seeded ``messages``.
+
+        Returns:
+            A state update appending the model's response message and
+            incrementing the call/token counters.
+        """
         resposta = llm_com_ferramentas.invoke(state["messages"])
         uso = getattr(resposta, "usage_metadata", None) or {}
         return {
@@ -193,6 +255,23 @@ def build_graph(*, store: RuleStore, df: pd.DataFrame, llm, structured_llm, labe
         }
 
     def finalizar_diagnostico(state: DiagnosticoPortfolioState) -> dict:
+        """Produces the rule's final structured verdict and appends it to the results.
+
+        Called once the model has no more tool calls to make. Reuses the
+        same ``structured_llm`` (``RuleAssessment`` via
+        ``with_structured_output``) as Deliverable 1's baseline, unchanged,
+        now fed the accumulated conversation instead of a single string
+        prompt. Never raises: a server-side or validation failure is
+        recorded as a failed result instead.
+
+        Args:
+            state: Current graph state, with the full conversation for
+                ``regra_atual`` (including any tool exchange).
+
+        Returns:
+            A state update appending one entry to ``resultados`` and
+            incrementing the call/token counters.
+        """
         chamadas_ferramenta = sum(1 for m in state["messages"] if isinstance(m, ToolMessage))
         try:
             saida = structured_llm.invoke(state["messages"])
