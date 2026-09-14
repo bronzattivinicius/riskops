@@ -82,6 +82,24 @@ class _FakeGeradorLLM:
                     }
                 ],
             )
+        if "regra_campo_invalido" in texto:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "testar_regra_candidata",
+                        "args": {
+                            "rule_id": "regra_campo_invalido",
+                            # campo hallucinated by the model -- does not exist in the fixture.
+                            "campo": "transaction_amount",
+                            "operador": "gt",
+                            "valor": 100,
+                            "combinar_com_atual": False,
+                        },
+                        "id": "call_1",
+                    }
+                ],
+            )
         return AIMessage(content="Nao preciso testar, ja sei o que propor.")
 
 
@@ -263,6 +281,33 @@ def test_graph_respects_recursion_limit(
             ),
             config={"recursion_limit": 2},
         )
+
+
+def test_gerador_ferramenta_trata_campo_inexistente_graciosamente(
+    tmp_rule_store: RuleStore, synthetic_applications_df: pd.DataFrame
+) -> None:
+    """A hallucinated field name in a tool call is reported as text, not an uncaught exception.
+
+    Regression test for a real bug found while executing this deliverable:
+    the model proposed a nonexistent column, and the tool let
+    UnknownFieldError propagate straight from the backtest engine,
+    crashing the whole batch instead of being handled like any other bad
+    argument.
+    """
+    tmp_rule_store.create(
+        _build_rule("regra_campo_invalido"), actor=_ACTOR, note="setup"
+    )
+    graph = _compile(tmp_rule_store, synthetic_applications_df)
+
+    resultado = graph.invoke(
+        _estado_inicial(["regra_campo_invalido"]), config={"recursion_limit": 50}
+    )
+
+    assert resultado["chamadas_ferramenta_gerador"] == 1
+    # o agente ainda finaliza normalmente depois da tentativa malsucedida com a ferramenta
+    (entrada,) = resultado["resultados"]
+    assert entrada["candidata"]["erro"] is None
+    assert entrada["candidata"]["melhorou"] is True
 
 
 def test_graph_handles_missing_rule_gracefully(

@@ -58,6 +58,29 @@ INSTRUCAO_SISTEMA_GERADOR = (
 _VEREDITOS_QUE_ACIONAM_GERADOR = ("revisar", "aposentar")
 
 
+def _campo_invalido(campo: str, df: pd.DataFrame) -> str | None:
+    """Checks whether a proposed field name actually exists in the dataset.
+
+    The model occasionally hallucinates a field name (e.g. a plausible but
+    nonexistent column like ``transaction_amount``); without this check,
+    ``evaluate_condition`` raises ``UnknownFieldError`` deep inside the
+    backtest engine and crashes the whole batch -- an uncaught-error mode
+    found for real while running this deliverable (Section G).
+
+    Args:
+        campo: Proposed field name.
+        df: Historical transaction data the field would be evaluated against.
+
+    Returns:
+        An error message naming valid columns if ``campo`` is not a column
+        of ``df``, or None if it is valid.
+    """
+    if campo in df.columns:
+        return None
+    colunas_disponiveis = ", ".join(sorted(c for c in df.columns))
+    return f"Campo {campo!r} nao existe nos dados. Campos disponiveis: {colunas_disponiveis}."
+
+
 class MultiAgenteState(TypedDict):
     """Graph state for the two-agent (diagnosis + generation) workflow.
 
@@ -160,6 +183,9 @@ def criar_ferramenta_teste_candidata(
             rule_atual = store.get(rule_id)
         except RuleNotFoundError:
             return f"Regra '{rule_id}' nao encontrada no registro."
+        erro_campo = _campo_invalido(campo, df)
+        if erro_campo:
+            return erro_campo
         try:
             candidata = construir_regra_candidata(
                 rule_atual,
@@ -486,37 +512,45 @@ def build_graph(
             }
 
         rule_atual = store.get(regra_id)
-        try:
-            candidata = construir_regra_candidata(
-                rule_atual,
-                campo=proposta.campo,
-                operador=proposta.operador,
-                valor=proposta.valor,
-                combinar_com_atual=proposta.combinar_com_atual,
-            )
-            comparacao = avaliar_candidata(
-                df, rule_atual, candidata, label_col=label_col
-            )
+        erro_campo = _campo_invalido(proposta.campo, df)
+        if erro_campo:
             resultado_candidata = {
                 "campo": proposta.campo,
-                "operador": proposta.operador,
-                "valor": proposta.valor,
-                "combinar_com_atual": proposta.combinar_com_atual,
-                "justificativa": proposta.justificativa,
-                "sugestao": proposta.sugestao,
-                "metricas_candidata": comparacao.candidate.metrics,
-                "delta_precisao": comparacao.delta_precision,
-                "delta_deteccao": comparacao.delta_detection_rate,
-                "delta_falso_positivo": comparacao.delta_false_positive_rate,
-                "melhorou": candidata_melhorou(comparacao),
-                "erro": None,
-            }
-        except ValueError as exc:
-            resultado_candidata = {
-                "campo": proposta.campo,
-                "erro": f"proposta invalida: {exc}",
+                "erro": erro_campo,
                 "melhorou": False,
             }
+        else:
+            try:
+                candidata = construir_regra_candidata(
+                    rule_atual,
+                    campo=proposta.campo,
+                    operador=proposta.operador,
+                    valor=proposta.valor,
+                    combinar_com_atual=proposta.combinar_com_atual,
+                )
+                comparacao = avaliar_candidata(
+                    df, rule_atual, candidata, label_col=label_col
+                )
+                resultado_candidata = {
+                    "campo": proposta.campo,
+                    "operador": proposta.operador,
+                    "valor": proposta.valor,
+                    "combinar_com_atual": proposta.combinar_com_atual,
+                    "justificativa": proposta.justificativa,
+                    "sugestao": proposta.sugestao,
+                    "metricas_candidata": comparacao.candidate.metrics,
+                    "delta_precisao": comparacao.delta_precision,
+                    "delta_deteccao": comparacao.delta_detection_rate,
+                    "delta_falso_positivo": comparacao.delta_false_positive_rate,
+                    "melhorou": candidata_melhorou(comparacao),
+                    "erro": None,
+                }
+            except ValueError as exc:
+                resultado_candidata = {
+                    "campo": proposta.campo,
+                    "erro": f"proposta invalida: {exc}",
+                    "melhorou": False,
+                }
 
         return {
             "resultados": [{**diagnostico, "candidata": resultado_candidata}],
