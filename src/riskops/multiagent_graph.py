@@ -23,6 +23,7 @@ from typing import Annotated, TypedDict
 
 import pandas as pd
 from langchain_core.messages import (
+    AIMessage,
     BaseMessage,
     HumanMessage,
     RemoveMessage,
@@ -306,8 +307,25 @@ def build_graph(
         )
 
     def agente_diagnostico(state: MultiAgenteState) -> dict:
-        """Lets the diagnostic agent decide whether it needs the history tool."""
-        resposta = llm_diagnostico.invoke(state["mensagens_diagnostico"])
+        """Lets the diagnostic agent decide whether it needs the history tool.
+
+        A malformed tool call (e.g. a wrong argument type) is rejected by
+        Groq's own server-side schema validation before any message comes
+        back -- found for real while executing this deliverable. Rather
+        than crash the batch, this is treated as "no tool call this turn":
+        the loop proceeds straight to finalization.
+        """
+        try:
+            resposta = llm_diagnostico.invoke(state["mensagens_diagnostico"])
+        except Exception as exc:
+            return {
+                "mensagens_diagnostico": [
+                    AIMessage(
+                        content=f"[chamada de ferramenta invalida, ignorada: {exc}]"
+                    )
+                ],
+                "chamadas_llm_diagnostico": 1,
+            }
         uso = getattr(resposta, "usage_metadata", None) or {}
         return {
             "mensagens_diagnostico": [resposta],
@@ -455,8 +473,24 @@ def build_graph(
         )
 
     def agente_gerador(state: MultiAgenteState) -> dict:
-        """Lets the generator agent decide whether to test a candidate."""
-        resposta = llm_gerador.invoke(state["mensagens_geracao"])
+        """Lets the generator agent decide whether to test a candidate.
+
+        Same server-side tool-call validation failure mode as
+        `agente_diagnostico` (Groq rejects a malformed argument, e.g. a
+        boolean where a number is expected, before any message comes
+        back) -- treated as "no tool call this turn" instead of crashing.
+        """
+        try:
+            resposta = llm_gerador.invoke(state["mensagens_geracao"])
+        except Exception as exc:
+            return {
+                "mensagens_geracao": [
+                    AIMessage(
+                        content=f"[chamada de ferramenta invalida, ignorada: {exc}]"
+                    )
+                ],
+                "chamadas_llm_gerador": 1,
+            }
         uso = getattr(resposta, "usage_metadata", None) or {}
         return {
             "mensagens_geracao": [resposta],

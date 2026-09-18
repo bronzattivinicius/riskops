@@ -100,6 +100,16 @@ class _FakeGeradorLLM:
                     }
                 ],
             )
+        if "regra_tool_malformada" in texto:
+            # Simulates Groq's own server-side tool-call schema validation
+            # rejecting a malformed argument (e.g. a boolean where a number
+            # is expected) -- found for real while executing this
+            # deliverable. LangChain surfaces this as an exception from
+            # `.invoke()`, before any message comes back.
+            raise ValueError(
+                "Tool call validation failed: parameters for tool testar_regra_candidata "
+                "did not match schema: errors: [`/valor`: expected number, but got boolean]"
+            )
         return AIMessage(content="Nao preciso testar, ja sei o que propor.")
 
 
@@ -308,6 +318,34 @@ def test_gerador_ferramenta_trata_campo_inexistente_graciosamente(
     (entrada,) = resultado["resultados"]
     assert entrada["candidata"]["erro"] is None
     assert entrada["candidata"]["melhorou"] is True
+
+
+def test_agente_gerador_trata_tool_call_malformada_graciosamente(
+    tmp_rule_store: RuleStore, synthetic_applications_df: pd.DataFrame
+) -> None:
+    """A tool call Groq itself rejects (schema mismatch) does not crash the batch.
+
+    Regression test for a real bug found while executing this deliverable:
+    the model sent a boolean where the tool expects a number, Groq's
+    server-side validation raised before any message came back, and
+    `agente_gerador` had no try/except around the call -- unlike every
+    other LLM call site in this module.
+    """
+    tmp_rule_store.create(
+        _build_rule("regra_tool_malformada"), actor=_ACTOR, note="setup"
+    )
+    graph = _compile(tmp_rule_store, synthetic_applications_df)
+
+    resultado = graph.invoke(
+        _estado_inicial(["regra_tool_malformada"]), config={"recursion_limit": 50}
+    )
+
+    # nenhuma chamada de ferramenta foi de fato concluida (a tentativa foi rejeitada
+    # antes disso), mas o lote nao quebrou e a regra foi finalizada normalmente.
+    assert resultado["chamadas_ferramenta_gerador"] == 0
+    (entrada,) = resultado["resultados"]
+    assert entrada["candidata"] is not None
+    assert entrada["candidata"]["erro"] is None
 
 
 def test_graph_handles_missing_rule_gracefully(
