@@ -22,6 +22,7 @@ import operator
 from typing import Annotated, TypedDict
 
 import pandas as pd
+from groq import RateLimitError
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -317,6 +318,11 @@ def build_graph(
         """
         try:
             resposta = llm_diagnostico.invoke(state["mensagens_diagnostico"])
+        except RateLimitError:
+            # Transiente (limite diario/por-minuto do Groq) -- deixa propagar para
+            # quem chamou o grafo poder esperar e tentar de novo, em vez de gravar
+            # como uma falha permanente desta regra.
+            raise
         except Exception as exc:
             return {
                 "mensagens_diagnostico": [
@@ -347,6 +353,11 @@ def build_graph(
         )
         try:
             saida = structured_llm_diagnostico.invoke(state["mensagens_diagnostico"])
+        except RateLimitError:
+            # Transiente (limite diario/por-minuto do Groq) -- deixa propagar para
+            # quem chamou o grafo poder esperar e tentar de novo, em vez de gravar
+            # como uma falha permanente desta regra.
+            raise
         except Exception as exc:
             return {
                 "diagnostico_atual": None,
@@ -482,6 +493,11 @@ def build_graph(
         """
         try:
             resposta = llm_gerador.invoke(state["mensagens_geracao"])
+        except RateLimitError:
+            # Transiente (limite diario/por-minuto do Groq) -- deixa propagar para
+            # quem chamou o grafo poder esperar e tentar de novo, em vez de gravar
+            # como uma falha permanente desta regra.
+            raise
         except Exception as exc:
             return {
                 "mensagens_geracao": [
@@ -514,6 +530,11 @@ def build_graph(
         )
         try:
             saida = structured_llm_gerador.invoke(state["mensagens_geracao"])
+        except RateLimitError:
+            # Transiente (limite diario/por-minuto do Groq) -- deixa propagar para
+            # quem chamou o grafo poder esperar e tentar de novo, em vez de gravar
+            # como uma falha permanente desta regra.
+            raise
         except Exception as exc:
             return {
                 "resultados": [
