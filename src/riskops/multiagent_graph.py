@@ -22,7 +22,8 @@ import operator
 from typing import Annotated, TypedDict
 
 import pandas as pd
-from groq import APIError
+from anthropic import APIError as AnthropicAPIError
+from groq import APIError as GroqAPIError
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -47,6 +48,13 @@ from riskops.rule_generator import (
     resumir_comparacao,
 )
 from riskops.rules.store import RuleNotFoundError, RuleStore
+
+_ERROS_TRANSIENTES_DE_PROVEDOR = (GroqAPIError, AnthropicAPIError)
+"""Transient provider errors (rate limit, timeout, connection) worth retrying.
+
+Covers both Groq and Anthropic since the LLM provider is chosen by the
+caller of ``build_graph``, not fixed in this module.
+"""
 
 INSTRUCAO_SISTEMA_GERADOR = (
     "Voce e um analista de risco propondo uma regra candidata para substituir ou complementar "
@@ -318,10 +326,12 @@ def build_graph(
         """
         try:
             resposta = llm_diagnostico.invoke(state["mensagens_diagnostico"])
-        except APIError:
-            # Transiente (rate limit, timeout, erro de conexao do Groq) -- deixa
-            # propagar para quem chamou o grafo poder esperar e tentar de novo, em
-            # vez de gravar como uma falha permanente desta regra.
+        except _ERROS_TRANSIENTES_DE_PROVEDOR:
+            # Transiente (rate limit, timeout, erro de conexao) -- deixa propagar
+            # para quem chamou o grafo poder esperar e tentar de novo, em vez de
+            # gravar como uma falha permanente desta regra. Cobre tanto Groq quanto
+            # Anthropic, ja que o provedor do LLM e escolhido por quem chama
+            # build_graph, nao fixado neste modulo.
             raise
         except Exception as exc:
             return {
@@ -353,10 +363,12 @@ def build_graph(
         )
         try:
             saida = structured_llm_diagnostico.invoke(state["mensagens_diagnostico"])
-        except APIError:
-            # Transiente (rate limit, timeout, erro de conexao do Groq) -- deixa
-            # propagar para quem chamou o grafo poder esperar e tentar de novo, em
-            # vez de gravar como uma falha permanente desta regra.
+        except _ERROS_TRANSIENTES_DE_PROVEDOR:
+            # Transiente (rate limit, timeout, erro de conexao) -- deixa propagar
+            # para quem chamou o grafo poder esperar e tentar de novo, em vez de
+            # gravar como uma falha permanente desta regra. Cobre tanto Groq quanto
+            # Anthropic, ja que o provedor do LLM e escolhido por quem chama
+            # build_graph, nao fixado neste modulo.
             raise
         except Exception as exc:
             return {
@@ -493,10 +505,12 @@ def build_graph(
         """
         try:
             resposta = llm_gerador.invoke(state["mensagens_geracao"])
-        except APIError:
-            # Transiente (rate limit, timeout, erro de conexao do Groq) -- deixa
-            # propagar para quem chamou o grafo poder esperar e tentar de novo, em
-            # vez de gravar como uma falha permanente desta regra.
+        except _ERROS_TRANSIENTES_DE_PROVEDOR:
+            # Transiente (rate limit, timeout, erro de conexao) -- deixa propagar
+            # para quem chamou o grafo poder esperar e tentar de novo, em vez de
+            # gravar como uma falha permanente desta regra. Cobre tanto Groq quanto
+            # Anthropic, ja que o provedor do LLM e escolhido por quem chama
+            # build_graph, nao fixado neste modulo.
             raise
         except Exception as exc:
             return {
@@ -530,10 +544,12 @@ def build_graph(
         )
         try:
             saida = structured_llm_gerador.invoke(state["mensagens_geracao"])
-        except APIError:
-            # Transiente (rate limit, timeout, erro de conexao do Groq) -- deixa
-            # propagar para quem chamou o grafo poder esperar e tentar de novo, em
-            # vez de gravar como uma falha permanente desta regra.
+        except _ERROS_TRANSIENTES_DE_PROVEDOR:
+            # Transiente (rate limit, timeout, erro de conexao) -- deixa propagar
+            # para quem chamou o grafo poder esperar e tentar de novo, em vez de
+            # gravar como uma falha permanente desta regra. Cobre tanto Groq quanto
+            # Anthropic, ja que o provedor do LLM e escolhido por quem chama
+            # build_graph, nao fixado neste modulo.
             raise
         except Exception as exc:
             return {
