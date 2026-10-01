@@ -7,7 +7,12 @@ artifacts stay exactly as delivered ("estrutura herdada... sem alteracao").
 Three containment mechanisms are implemented here:
 
 1. Retry with capped exponential backoff (`com_repeticao`), for transient
-   failures only -- never for a genuine model-output error.
+   failures only -- never for a genuine model-output error. This also
+   covers a real, observed failure mode: `gpt-oss-20b` via Groq
+   occasionally names its tool call `'functions.X'` instead of `'X'`,
+   which LangChain's parser rejects (`FalhaDeFormatoTransitoria`) -- a
+   non-deterministic formatting slip, not a stable incompatibility, so
+   retrying the same prompt is the right response.
 2. Graceful degradation (`diagnosticar_com_robustez`), which falls back to
    the deterministic reference verdict when the model is unreachable after
    every retry, and always self-identifies as degraded in its own output.
@@ -50,6 +55,20 @@ Same tuple used by `riskops.multiagent_graph`, redefined here so this module
 stays independently importable and does not reach into that module's
 private name.
 """
+
+
+class FalhaDeFormatoTransitoria(Exception):
+    """A model response that failed to parse into the expected schema, worth retrying.
+
+    Distinct from a genuine model-output error (wrong verdict, hallucinated
+    field): this covers failures in the tool-call protocol itself, e.g. a
+    real, observed `gpt-oss-20b`/Groq quirk where the model occasionally
+    names its tool call `'functions.RuleAssessmentRobusta'` instead of
+    `'RuleAssessmentRobusta'`, which LangChain's parser rejects
+    ("Unknown tool type"). Retrying is reasonable because the same prompt
+    was observed to succeed on a later attempt -- the failure is a
+    non-deterministic formatting slip, not a stable incompatibility.
+    """
 
 
 class FonteInstavel(Exception):
@@ -251,6 +270,8 @@ def diagnosticar_regra_robusta(
     structured_llm_robusto,
     label_col: str = "fraud_bool",
     tentativas: int = 3,
+    espera_inicial: float = 0.2,
+    fator: float = 2.0,
 ) -> dict:
     """Runs Deliverable 1's diagnostic with retry, graceful degradation and active verification.
 
@@ -278,7 +299,13 @@ def diagnosticar_regra_robusta(
             `.with_structured_output(RuleAssessmentRobusta, include_raw=True)`.
         label_col: Name of the boolean fraud-label column in `df`.
         tentativas: Maximum number of attempts against transient provider
-            errors before degrading.
+            errors (or a transient response-parsing failure, see
+            `FalhaDeFormatoTransitoria`) before degrading.
+        espera_inicial: Seconds to wait before the second attempt (passed to
+            `com_repeticao`). Real per-minute provider rate limits need a
+            larger value than this function's conservative default.
+        fator: Backoff multiplier applied after each failed attempt (passed
+            to `com_repeticao`).
 
     Returns:
         A dict with `ok`, `degradado`, and, when `ok=True`: `veredito`,
@@ -293,11 +320,25 @@ def diagnosticar_regra_robusta(
     referencia = veredito_referencia(metricas, baseline_fraud_rate)
     prompt = montar_prompt(rule, metricas, baseline_fraud_rate)
 
+    def _invocar(prompt):
+        saida = structured_llm_robusto.invoke(prompt)
+        if saida["parsed"] is None:
+            # Falha real, observada ao vivo: o modelo as vezes nomeia a chamada de
+            # ferramenta como 'functions.RuleAssessmentRobusta' em vez de
+            # 'RuleAssessmentRobusta', que o parser do LangChain rejeita
+            # ("Unknown tool type"). Nao e um erro de raciocinio do modelo -- e uma
+            # falha de formatacao intermitente (o mesmo prompt funciona em outra
+            # tentativa), entao vale a pena tratar como transitoria e tentar de novo.
+            raise FalhaDeFormatoTransitoria(str(saida.get("parsing_error")))
+        return saida
+
     saida, info_repeticao = com_repeticao(
-        structured_llm_robusto.invoke,
+        _invocar,
         prompt,
         tentativas=tentativas,
-        transitorias=ERROS_TRANSIENTES_DE_PROVEDOR,
+        espera_inicial=espera_inicial,
+        fator=fator,
+        transitorias=ERROS_TRANSIENTES_DE_PROVEDOR + (FalhaDeFormatoTransitoria,),
     )
     latencia = time.perf_counter() - inicio
 
@@ -371,6 +412,8 @@ def diagnosticar_com_robustez(
     structured_llm_robusto,
     label_col: str = "fraud_bool",
     tentativas: int = 3,
+    espera_inicial: float = 0.2,
+    fator: float = 2.0,
 ) -> dict:
     """`rule_id`-based entry point for `diagnosticar_regra_robusta`.
 
@@ -389,7 +432,9 @@ def diagnosticar_com_robustez(
             `.with_structured_output(RuleAssessmentRobusta, include_raw=True)`.
         label_col: Name of the boolean fraud-label column in `df`.
         tentativas: Maximum number of attempts against transient provider
-            errors before degrading.
+            errors (or a transient response-parsing failure) before degrading.
+        espera_inicial: Seconds to wait before the second attempt.
+        fator: Backoff multiplier applied after each failed attempt.
 
     Returns:
         Same shape as `diagnosticar_regra_robusta`, plus the same
@@ -427,6 +472,8 @@ def diagnosticar_com_robustez(
         structured_llm_robusto=structured_llm_robusto,
         label_col=label_col,
         tentativas=tentativas,
+        espera_inicial=espera_inicial,
+        fator=fator,
     )
 
 

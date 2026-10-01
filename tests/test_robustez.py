@@ -254,6 +254,64 @@ def test_diagnosticar_com_robustez_regra_inexistente_nao_degrada(
     assert "nao encontrada" in resultado["erro"]
 
 
+class _FakeStructuredLLMFalhaDeFormatoUmaVez:
+    """Returns a 'functions.X'-style unparseable response once, then succeeds (real Groq quirk)."""
+
+    def __init__(self):
+        self.chamadas = 0
+
+    def invoke(self, prompt):
+        self.chamadas += 1
+        if self.chamadas == 1:
+            return {"parsed": None, "raw": AIMessage(content=""), "parsing_error": "Unknown tool type: 'functions.X'"}
+        avaliacao = RuleAssessmentRobusta(
+            veredito="manter", justificativa="citando 40% de deteccao", sugestao="manter", confianca="media"
+        )
+        return {"parsed": avaliacao, "raw": AIMessage(content=""), "parsing_error": None}
+
+
+class _FakeStructuredLLMFalhaDeFormatoSempre:
+    """Always returns a 'functions.X'-style unparseable response (simulated persistent quirk)."""
+
+    def invoke(self, prompt):
+        return {"parsed": None, "raw": AIMessage(content=""), "parsing_error": "Unknown tool type: 'functions.X'"}
+
+
+def test_diagnosticar_com_robustez_tenta_de_novo_apos_falha_de_formato(
+    store_com_regra: RuleStore, synthetic_applications_df: pd.DataFrame
+) -> None:
+    """A one-off 'functions.X' tool-name parsing failure is retried, not treated as permanent."""
+    resultado = diagnosticar_com_robustez(
+        "regra_teste",
+        store=store_com_regra,
+        df=synthetic_applications_df,
+        structured_llm_robusto=_FakeStructuredLLMFalhaDeFormatoUmaVez(),
+        tentativas=3,
+        espera_inicial=0.0,
+    )
+    assert resultado["ok"] is True
+    assert resultado["degradado"] is False
+    assert resultado["veredito"] == "manter"
+    assert resultado["tentativas"] == 2
+
+
+def test_diagnosticar_com_robustez_degrada_se_falha_de_formato_persiste(
+    store_com_regra: RuleStore, synthetic_applications_df: pd.DataFrame
+) -> None:
+    """Exhausting retries on a persistent parsing failure degrades gracefully, same as a provider error."""
+    resultado = diagnosticar_com_robustez(
+        "regra_teste",
+        store=store_com_regra,
+        df=synthetic_applications_df,
+        structured_llm_robusto=_FakeStructuredLLMFalhaDeFormatoSempre(),
+        tentativas=2,
+        espera_inicial=0.0,
+    )
+    assert resultado["ok"] is True
+    assert resultado["degradado"] is True
+    assert resultado["tentativas"] == 2
+
+
 def test_diagnosticar_regra_robusta_aceita_variante_em_memoria(
     synthetic_applications_df: pd.DataFrame,
 ) -> None:
